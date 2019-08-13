@@ -1,0 +1,295 @@
+function numberPlateExtraction
+f=imread('5.Jpg'); 
+f=imresize(f,[400 760]);
+g=rgb2gray(f); 
+g=medfilt2(g,[3 3]); 
+se=strel('disk',1); 
+gi=imdilate(g,se); 
+ge=imerode(g,se); 
+gdiff=imsubtract(gi,ge); 
+gdiff=mat2gray(gdiff); 
+gdiff=conv2(gdiff,[1 1;1 1]); 
+gdiff=imadjust(gdiff,[0.5 0.7],[0 1]); 
+er=imerode(gdiff,strel('line',50,0));
+out1=imsubtract(gdiff,er);
+F=imfill(out1,'holes');
+H=bwmorph(F,'thin',1);
+H=imerode(H,strel('line',3,90));
+final=bwareaopen(H,100);
+Iprops=regionprops(final,'BoundingBox','Image');
+NR=cat(1,Iprops.BoundingBox);
+    
+
+r=controlling(NR);
+if ~isempty(r) 
+    I={Iprops.Image};
+    noPlate=[]; 
+    for v=1:length(r)
+        N=I{1,r(v)};
+        letter=readLetter(N);
+        noPlate=[noPlate letter]; 
+    end
+    
+    disp('NUMBER PLATE');
+    disp(noPlate);
+    disp('Vehicle information is sucessfully stored in the database')
+    t=datetime();
+    t.Format='eeee, MMMM d, yyyy h:mm a';
+    fid = fopen('database.txt', 'a');
+    fprintf(fid,'%s             %s      %s\r',noPlate,t,state(noPlate));
+    fclose(fid);
+    
+else 
+    fprintf('Unable to extract the characters from the number plate.\n');
+end
+end
+function r=controlling(NR)
+[Q,W]=hist(NR(:,4)); 
+ind=find(Q==10); 
+for k=1:length(NR)            
+    C_5(k)=NR(k,2) * NR(k,4); 
+end
+NR2=cat(2,NR,C_5');           
+[E,R]=hist(NR2(:,5),20);
+Y=find(E==10);                 
+if length(ind)==1 
+    MP=W(ind);    
+    binsize=W(2)-W(1); 
+    container=[MP-(binsize/2) MP+(binsize/2)]; 
+    r=takeboxes(NR,container,2);
+elseif length(Y)==1
+    MP=R(Y);
+    binsize=R(2)-R(1);
+    container=[MP-(binsize/2) MP+(binsize/2)]; 
+    r=takeboxes(NR2,container,2.5);     
+elseif isempty(ind) || length(ind)>1 
+    [A,B]=hist(NR(:,2),20); 
+    ind2=find(A==10);
+    if length(ind2)==1
+        MP=B(ind2);
+        binsize=B(2)-B(1);
+        container=[MP-(binsize/2) MP+(binsize/2)]; 
+        r=takeboxes(NR,container,1);
+    else
+        container=guessthesix(A,B,(B(2)-B(1))); 
+        if ~isempty(container) 
+            r=takeboxes(NR,container,1); 
+        elseif isempty(container)
+            container2=guessthesix(E,R,(R(2)-R(1)));
+            if ~isempty(container2)
+                r=takeboxes(NR2,container2,2.5);
+            else
+                r=[]; 
+            end
+        end
+        
+    end
+end
+end
+
+function container=guessthesix(Q,W,bsize)
+
+for l=9:-1:2 
+    val=find(Q==l); 
+    var=length(val); 
+    if isempty(var) || var == 1 
+        if val == 1
+            index=val+1; 
+        else
+            index=val; 
+        end
+        if length(Q)==val 
+            index=[];    
+        end
+        if Q(index)+Q(index+1) == 10 
+            container=[W(index)-(bsize/2) W(index+1)+(bsize/2)]; 
+            break;                                               
+        elseif Q(index)+Q(index-1) == 10 
+            container=[W(index-1)-(bsize/2) W(index)+(bsize/2)]; 
+            break;                                               
+        end
+    else 
+        for k=1:1:var 
+            if val(k)==1
+                index=val(k)+1; 
+            else
+                index=val(k); 
+            end
+            if length(Q)==val(k) 
+                index=[];        
+            end
+            if Q(index)+Q(index+1) == 10
+                container=[W(index)-(bsize/2) W(index+1)+(bsize/2)]; 
+                break;
+            elseif Q(index)+Q(index-1) == 10
+                container=[W(index-1)-(bsize/2) W(index)+(bsize/2)];
+                break;
+            end
+        end
+        if k~=var 
+            break;
+        end
+    end
+end
+if l==2
+    container=[];
+end
+end
+function r=takeboxes(NR,container,chk)
+takethisbox=[]; 
+for i=1:size(NR,1)
+    if NR(i,(2*chk))>=container(1) && NR(i,(2*chk))<=container(2) 
+        takethisbox=cat(1,takethisbox,NR(i,:)); 
+    end
+end
+r=[];
+for k=1:size(takethisbox,1)
+    var=find(takethisbox(k,1)==reshape(NR(:,1),1,[])); 
+    if length(var)==1                                    
+        r=[r var];                                     
+    else                                               
+        for v=1:length(var)                           
+            M(v)=NR(var(v),(2*chk))>=container(1) && NR(var(v),(2*chk))<=container(2);
+        end
+        var=var(M);
+        r=[r var];
+    end
+end
+end
+%gives the character as output based on the index value
+function letter=readLetter(snap)
+load NewTemplates 
+snap=imresize(snap,[42 24]); 
+comp=[ ];
+for n=1:length(NewTemplates)
+    sem=corr2(NewTemplates{1,n},snap); 
+    comp=[comp sem]; 
+end
+vd=find(comp==max(comp)); 
+if vd==1 || vd==2
+    letter='A';
+elseif vd==3 || vd==4
+    letter='B';
+elseif vd==5
+    letter='C';
+elseif vd==6 || vd==7
+    letter='D';
+elseif vd==8
+    letter='E';
+elseif vd==9
+    letter='F';
+elseif vd==10
+    letter='G';
+elseif vd==11
+    letter='H';
+elseif vd==12
+    letter='I';
+elseif vd==13
+    letter='J';
+elseif vd==14
+    letter='K';
+elseif vd==15
+    letter='L';
+elseif vd==16
+    letter='M';
+elseif vd==17
+    letter='N';
+elseif vd==18 || vd==19
+    letter='O';
+elseif vd==20 || vd==21
+    letter='P';
+elseif vd==22 || vd==23
+    letter='Q';
+elseif vd==24 || vd==25
+    letter='R';
+elseif vd==26
+    letter='S';
+elseif vd==27
+    letter='T';
+elseif vd==28
+    letter='U';
+elseif vd==29
+    letter='V';
+elseif vd==30
+    letter='W';
+elseif vd==31
+    letter='X';
+elseif vd==32
+    letter='Y';
+elseif vd==33
+    letter='Z';
+    %*-*-*-*-*
+% Numerals listings.
+elseif vd==34
+    letter='1';
+elseif vd==35
+    letter='2';
+elseif vd==36
+    letter='3';
+elseif vd==37 || vd==38
+    letter='4';
+elseif vd==39
+    letter='5';
+elseif vd==40 || vd==41 || vd==42
+    letter='6';
+elseif vd==43
+    letter='7';
+elseif vd==44 || vd==45
+    letter='8';
+elseif vd==46 || vd==47 || vd==48
+    letter='9';
+else
+    letter='0';
+end
+end
+
+%gives the states name based on the starting two letters in the numberplate
+function s=state(no)
+if (no(1)=='A' && no(2)=='P')
+    s='Andhra Pradesh';
+elseif (no(1)=='T' && no(2)=='S')
+    s='Telangana'; 
+elseif (no(1)=='T' && no(2)=='N')
+    s='Tamilnadu';
+elseif (no(1)=='K' && no(2)=='L')
+    s='Kerala' ;
+elseif (no(1)=='K' && no(2)=='A')
+    s='Karnataka'; 
+elseif (no(1)=='M' && no(2)=='H')
+    s='Maharastra'; 
+elseif (no(1)=='G' && no(2)=='J')
+    s='Gujrath'; 
+elseif (no(1)=='R' && no(2)=='J')
+    s='Rajasthan';     
+elseif (no(1)=='U' && no(2)=='P')
+    s='Utter Prsdesh';     
+elseif (no(1)=='O' && no(2)=='R')
+    s='Orissa';     
+elseif (no(1)=='C' && no(2)=='H')
+    s='Chandigarh';     
+elseif (no(1)=='J' && no(2)=='H')
+    s='Jarkhand';  
+elseif (no(1)=='W' && no(2)=='B')
+    s='West Bengal';  
+elseif (no(1)=='B' && no(2)=='R')
+    s='Bihar';     
+elseif (no(1)=='D' && no(2)=='L')
+    s='Delhi';     
+elseif (no(1)=='P' && no(2)=='B')
+    s='Punjab';
+elseif (no(1)=='A' && no(2)=='S')
+    s='Assam';     
+elseif (no(1)=='M' && no(2)=='L')
+    s='Megalaya';     
+elseif (no(1)=='T' && no(2)=='R')
+    s='Tripura';  
+elseif (no(1)=='N' && no(2)=='L')
+    s='Nagaland'; 
+elseif (no(1)=='M' && no(2)=='N')
+    s='Manipur';     
+elseif (no(1)=='M' && no(2)=='Z')
+    s='Mizarom';     
+elseif (no(1)=='A' && no(2)=='R')
+    s='Arunachal pradesh';     
+end
+end
